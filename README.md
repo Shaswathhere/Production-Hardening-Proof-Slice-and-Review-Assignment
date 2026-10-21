@@ -40,18 +40,30 @@ The breaker must:
 - increment `metrics.breaker_open_total` on every trip and call `onStateChange(state)` on every
   transition.
 
-## What to submit
+---
 
-Open a pull request on a branch named `production-hardening-slice`, and in your README include these
-labelled sections:
+## Production-Hardening Proof Slice Documentation
 
-1. **Risk addressed**
-2. **Chosen control**
-3. **How to run / test**
-4. **Evidence** (a reviewer can confirm it works without reading all your code)
-5. **Observability note** (which metric moves and which state changes are logged)
-6. **Trade-off**
-7. **Remaining risk**
-8. **How this production control protects my Modules 1–3 design**
+### 1. Risk addressed
+Prevents cascading system failure, latency pile-ups, and thread exhaustion caused by continuing to send doomed requests to an unavailable or degrading external model provider.
 
-Submit the pull-request URL.
+### 2. Chosen control
+A stateful circuit breaker (`CLOSED`, `OPEN`, `HALF_OPEN`) implemented in [`src/circuitBreaker.js`](./src/circuitBreaker.js) that intercepts calls in [`src/replyService.js`](./src/replyService.js) and fails fast to a human queue fallback.
+
+### 3. How to run / test
+Run `node --test` (requires Node.js 18+). Expected result: all 8 test cases pass (`# pass 8 # fail 0`).
+
+### 4. Evidence
+`test/circuitBreaker.test.js` verifies threshold tripping, short-circuiting without invoking the provider, and half-open probing; `test/replyService.test.js` verifies that requests degrade gracefully to `circuit_open` fallback once tripped.
+
+### 5. Observability note
+Exposes `metrics.breaker_open_total` (increments on every transition to `OPEN`), `metrics.short_circuited_total` (increments on every short-circuited call), and triggers `onStateChange(state)` (`OPEN`, `HALF_OPEN`, `CLOSED`) for real-time alerting and structured logging.
+
+### 6. Trade-off
+Favors availability and fast failure over eventual success; sudden intermittent error spikes may trip the breaker and temporarily serve fallback replies even if upstream has partially recovered.
+
+### 7. Remaining risk
+Does not enforce individual request timeouts if the external provider hangs indefinitely without throwing, nor does it isolate failures on a per-tenant or per-model basis.
+
+### 8. How this production control protects my Modules 1–3 design
+Protects core SLA commitments and architecture boundaries by decoupling user ticket ingestion from third-party model availability, preserving system responsiveness even under upstream dependency outage.
